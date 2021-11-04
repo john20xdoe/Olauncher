@@ -1,24 +1,35 @@
 {
-	"name": "Android",
-	"build": {
-		"dockerfile": "Dockerfile",
-		"args": {
-			// Need to use JDK 8 because of sdkmanager
-			"JDK_VARIANT": "8"
-		}
-	},
+  "name": "Android",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      // Need to use JDK 8 because of sdkmanager
+      "JDK_VARIANT": "8"
+    }
+  },
 
-	// Set *default* container specific settings.json values on container create.
-	"settings": { 
-		"terminal.integrated.shell.linux": "/bin/bash",
-		"java.home": "/docker-java-home"
-	},
-	
-    // Add the IDs of extensions you want installed when the container is created.
-    // TODO: add Kotlin extension
-	"extensions": [
-		"vscjava.vscode-java-pack",
-		"mathiasfrohlich.kotlin",
-		"adelphes.android-dev-ext"
-	]
+  "forwardPorts": [1255],
+
+  // Set *default* container specific settings.json values on container create.
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash",
+    "java.home": "/docker-java-home"
+  },
+
+  // Add the IDs of extensions you want installed when the container is created.
+  // TODO: add Kotlin extension
+  "extensions": [
+    "vscjava.vscode-java-pack",
+    "mathiasfrohlich.kotlin",
+    "adelphes.android-dev-ext"
+  ],
+
+  "features": {
+    "node": {
+      "version": "lts",
+      "nodeGypDependencies": true
+    }
+  },
+
+  "postCreateCommand": ". ${NVM_DIR}/nvm.sh && nvm install --lts"
 }

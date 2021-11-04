@@ -29,3 +29,10 @@ RUN yes Y | ${ANDROID_SDK_ROOT}/cmdline-tools/tools/bin/sdkmanager --licenses
 
 # Add the tools and platform-tools to PATH
 ENV PATH="${PATH}:${ANDROID_SDK_ROOT}/tools:${ANDROID_SDK_ROOT}/platform-tools"
+
+# initialize nvm
+ENV NVM_DIR="/usr/local/share/nvm"
+ENV NVM_SYMLINK_CURRENT=true \
+    PATH=${NVM_DIR}/current/bin:${PATH}
+COPY library-scripts/node-debian.sh /tmp/library-scripts/
+RUN apt-get update && bash /tmp/library-scripts/node-debian.sh "${NVM_DIR}"
