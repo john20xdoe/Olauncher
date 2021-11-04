@@ -1,0 +1,22 @@
+{
+  "name": "plauncher",
+  "version": "0.1.0",
+  "description": "Custom fork of Olauncher",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "serve:apk": "serve -p 1255 app/build/outputs/apk/debug/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/john20xdoe/Olauncher.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/john20xdoe/Olauncher/issues"
+  },
+  "homepage": "https://github.com/john20xdoe/Olauncher#readme",
+  "dependencies": {
+    "serve": "^13.0.2"
+  }
+}
