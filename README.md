@@ -1,9 +1,14 @@
-![Olauncher](https://repository-images.githubusercontent.com/278638069/82fbed00-f4f3-11ea-8028-1493d78c4ebd)
+![Olauncher](https://repository-images.githubusercontent.com/278638069/db0acb80-661b-11eb-803e-926cae5dccb4)
 
-# Olauncher | Minimal AF
-Olauncher is a minimal launcher app for Android. AF stands for Ad-Free. It can also update your wallpaper daily, if you want.
 
-## Installation
+# Olauncher | Minimal AF Launcher
+AF stands for Ad-Free :D
+
+
+## Install
+
+#### Install from [F-Droid](https://f-droid.org/packages/app.olauncher) or [Play Store](https://play.google.com/store/apps/details?id=app.olauncher) or download the APK from the [latest release](https://github.com/tanujnotes/Olauncher/releases/).
+
 [<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
     alt="Get it on F-Droid"
     height="80">](https://f-droid.org/packages/app.olauncher)
@@ -11,24 +16,16 @@ Olauncher is a minimal launcher app for Android. AF stands for Ad-Free. It can a
     alt="Get it on F-Droid"
     height="80">](https://play.google.com/store/apps/details?id=app.olauncher)
 
-Download from [F-Droid](https://f-droid.org/packages/app.olauncher) or [Play Store](https://play.google.com/store/apps/details?id=app.olauncher). You can also clone the master branch and build the app yourself in Android Studio. No extra steps required. Or download the APK from [latest release](https://github.com/tanujnotes/Olauncher/releases/).
+To maintain the simplicity of the launcher, a few niche features are available but hidden.
 
-## What's next
-Nothing. It's perfect! 😁
+Please check out the [About](https://tanujnotes.substack.com/p/olauncher-minimal-af-launcher?utm_source=github) page in Olauncher settings for the complete feature list and FAQs.
 
-**Done**
+##
 
-:heavy_check_mark: Hide apps  
-:heavy_check_mark: Work apps support  
-:heavy_check_mark: Rename apps on the home screen
+License: [GNU GPLv3](https://www.gnu.org/licenses/gpl-3.0.en.html)
 
-## Contact
-Tanuj M. ([@tanujnotes](https://twitter.com/tanujnotes))
+Developer: [@tanujnotes](https://twitter.com/tanujnotes)
 
-## License
-[GNU GPLv3 ](https://www.gnu.org/licenses/gpl-3.0.en.html)
+Thank you and have a great day!
 
-#
-In case you want to buy me a coffee - www.buymeacoff.ee/tanujnotes
-
-Thank you.
+<a href="https://www.buymeacoffee.com/tanujnotes"><img src="https://img.buymeacoffee.com/button-api/?text=Buy dev a coffee&emoji=&slug=tanujnotes&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>

@@ -1,18 +1,44 @@
 package app.olauncher.helper
 
+import android.annotation.SuppressLint
+import android.app.SearchManager
 import android.app.WallpaperManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
-import android.graphics.*
+import android.content.res.Configuration
+import android.content.res.Configuration.UI_MODE_NIGHT_YES
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Point
+import android.net.Uri
+import android.os.Build
 import android.os.UserHandle
 import android.os.UserManager
-import android.view.Gravity
+import android.provider.AlarmClock
+import android.provider.CalendarContract
+import android.provider.MediaStore
+import android.provider.Settings
+import android.util.DisplayMetrics
+import android.util.Log
+import android.util.TypedValue
+import android.view.View
 import android.view.WindowManager
+import android.view.animation.LinearInterpolator
 import android.widget.Toast
+import androidx.annotation.AttrRes
+import androidx.annotation.ColorInt
+import androidx.appcompat.app.AppCompatDelegate
 import app.olauncher.BuildConfig
+import app.olauncher.R
 import app.olauncher.data.AppModel
 import app.olauncher.data.Constants
 import app.olauncher.data.Prefs
@@ -22,22 +48,24 @@ import org.json.JSONObject
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.*
+import java.text.Collator
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.Scanner
+import kotlin.math.pow
+import kotlin.math.sqrt
 
-
-fun showToastLong(context: Context, message: String) {
-    val toast = Toast.makeText(context.applicationContext, message, Toast.LENGTH_LONG)
-    toast.setGravity(Gravity.CENTER, 0, 0)
-    toast.show()
+fun Context.showToast(message: String?, duration: Int = Toast.LENGTH_SHORT) {
+    if (message.isNullOrBlank()) return
+    Toast.makeText(this, message, duration).show()
 }
 
-fun showToastShort(context: Context, message: String) {
-    val toast = Toast.makeText(context.applicationContext, message, Toast.LENGTH_SHORT)
-    toast.setGravity(Gravity.CENTER, 0, 0)
-    toast.show()
+fun Context.showToast(stringResource: Int, duration: Int = Toast.LENGTH_SHORT) {
+    Toast.makeText(this, getString(stringResource), duration).show()
 }
 
-suspend fun getAppsList(context: Context): MutableList<AppModel> {
+suspend fun getAppsList(context: Context, prefs: Prefs, includeHiddenApps: Boolean = false): MutableList<AppModel> {
     return withContext(Dispatchers.IO) {
         val appList: MutableList<AppModel> = mutableListOf()
 
@@ -47,33 +75,57 @@ suspend fun getAppsList(context: Context): MutableList<AppModel> {
 
             val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
             val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+            val collator = Collator.getInstance()
 
             for (profile in userManager.userProfiles) {
                 for (app in launcherApps.getActivityList(null, profile)) {
-                    if (!hiddenApps.contains(app.applicationInfo.packageName + "|" + profile.toString())
-                        and (app.applicationInfo.packageName != BuildConfig.APPLICATION_ID)
+
+                    val appLabelShown = prefs.getAppRenameLabel(app.applicationInfo.packageName).ifBlank { app.label.toString() }
+
+                    if (includeHiddenApps && app.applicationInfo.packageName != BuildConfig.APPLICATION_ID)
+                        appList.add(
+                            AppModel(
+                                appLabelShown,
+                                collator.getCollationKey(app.label.toString()),
+                                app.applicationInfo.packageName,
+                                app.componentName.className,
+                                profile
+                            )
+                        )
+                    else if (!hiddenApps.contains(app.applicationInfo.packageName + "|" + profile.toString())
+                        && app.applicationInfo.packageName != BuildConfig.APPLICATION_ID
                     )
-                        appList.add(AppModel(app.label.toString(), app.applicationInfo.packageName, profile))
+                        appList.add(
+                            AppModel(
+                                appLabelShown,
+                                collator.getCollationKey(app.label.toString()),
+                                app.applicationInfo.packageName,
+                                app.componentName.className,
+                                profile
+                            )
+                        )
                 }
             }
-            appList.sortBy { it.appLabel.toLowerCase(Locale.ROOT) }
+            appList.sortBy { it.appLabel.lowercase() }
 
-        } catch (e: java.lang.Exception) {
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
         appList
     }
 }
 
-suspend fun getHiddenAppsList(context: Context): MutableList<AppModel> {
+suspend fun getHiddenAppsList(context: Context, prefs: Prefs): MutableList<AppModel> {
     return withContext(Dispatchers.IO) {
         val pm = context.packageManager
-        if (!Prefs(context).hiddenAppsUpdated) upgradeHiddenApps(Prefs(context))
+        if (!prefs.hiddenAppsUpdated) upgradeHiddenApps(prefs)
 
-        val hiddenAppsSet = Prefs(context).hiddenApps
+        val hiddenAppsSet = prefs.hiddenApps
         val appList: MutableList<AppModel> = mutableListOf()
         if (hiddenAppsSet.isEmpty()) return@withContext appList
 
         val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
+        val collator = Collator.getInstance()
         for (hiddenPackage in hiddenAppsSet) {
             try {
                 val appPackage = hiddenPackage.split("|")[0]
@@ -84,13 +136,14 @@ suspend fun getHiddenAppsList(context: Context): MutableList<AppModel> {
                 }
 
                 val appInfo = pm.getApplicationInfo(appPackage, 0)
-                val appName = pm.getApplicationLabel(appInfo).toString()
-                appList.add(AppModel(appName, appPackage, userHandle))
+                val appLabelShown = prefs.getAppRenameLabel(appPackage).ifBlank { pm.getApplicationLabel(appInfo).toString() }
+                val appKey = collator.getCollationKey(appLabelShown)
+                appList.add(AppModel(appLabelShown, appKey, appPackage, null, userHandle))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-        appList.sortBy { it.appLabel.toLowerCase(Locale.ROOT) }
+        appList.sortBy { it.appLabel.lowercase() }
         appList
     }
 }
@@ -108,18 +161,25 @@ private fun upgradeHiddenApps(prefs: Prefs) {
     prefs.hiddenAppsUpdated = true
 }
 
-fun isPackageInstalled(packageName: String, packageManager: PackageManager): Boolean {
-    return try {
-        packageManager.getPackageInfo(packageName, 0)
-        true
-    } catch (e: PackageManager.NameNotFoundException) {
-        false
-    }
+fun isPackageInstalled(context: Context, packageName: String, userString: String): Boolean {
+    val launcher = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+    val activityInfo = launcher.getActivityList(packageName, getUserHandleFromString(context, userString))
+    if (activityInfo.size > 0) return true
+    return false
 }
 
-fun isOlauncherDefault(context: Context?): Boolean {
-    val launcherPackageName =
-        getDefaultLauncherPackage(context!!)
+fun getUserHandleFromString(context: Context, userHandleString: String): UserHandle {
+    val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
+    for (userHandle in userManager.userProfiles) {
+        if (userHandle.toString() == userHandleString) {
+            return userHandle
+        }
+    }
+    return android.os.Process.myUserHandle()
+}
+
+fun isOlauncherDefault(context: Context): Boolean {
+    val launcherPackageName = getDefaultLauncherPackage(context)
     return BuildConfig.APPLICATION_ID == launcherPackageName
 }
 
@@ -134,48 +194,53 @@ fun getDefaultLauncherPackage(context: Context): String {
     } else "android"
 }
 
-// Source: https://stackoverflow.com/a/13239706
-fun resetDefaultLauncher(context: Context) {
+fun setPlainWallpaperByTheme(context: Context, appTheme: Int) {
+    when (appTheme) {
+        AppCompatDelegate.MODE_NIGHT_YES -> setPlainWallpaper(context, android.R.color.black)
+        AppCompatDelegate.MODE_NIGHT_NO -> setPlainWallpaper(context, android.R.color.white)
+        else -> {
+            if (context.isDarkThemeOn())
+                setPlainWallpaper(context, android.R.color.black)
+            else setPlainWallpaper(context, android.R.color.white)
+        }
+    }
+}
+
+fun setPlainWallpaper(context: Context, color: Int) {
     try {
-        val packageManager = context.packageManager
-        val componentName = ComponentName(context, FakeHomeActivity::class.java)
-        packageManager.setComponentEnabledSetting(
-            componentName,
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-            PackageManager.DONT_KILL_APP
-        )
-        val selector = Intent(Intent.ACTION_MAIN)
-        selector.addCategory(Intent.CATEGORY_HOME)
-        context.startActivity(selector)
-        packageManager.setComponentEnabledSetting(
-            componentName,
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            PackageManager.DONT_KILL_APP
-        )
+        val bitmap = Bitmap.createBitmap(1000, 2000, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(context.getColor(color))
+        val manager = WallpaperManager.getInstance(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            manager.setBitmap(bitmap, null, false, WallpaperManager.FLAG_SYSTEM)
+            manager.setBitmap(bitmap, null, false, WallpaperManager.FLAG_LOCK)
+        } else
+            manager.setBitmap(bitmap)
+        bitmap.recycle()
     } catch (e: Exception) {
         e.printStackTrace()
     }
 }
 
-fun setBlackWallpaper(context: Context) {
-    try {
-        val bitmap = Bitmap.createBitmap(1000, 2000, Bitmap.Config.ARGB_8888)
-        bitmap.eraseColor(context.getColor(android.R.color.black))
-        val manager = WallpaperManager.getInstance(context)
-        manager.setBitmap(bitmap)
-        bitmap.recycle()
-    } catch (e: Exception) {
+fun getChangedAppTheme(context: Context, currentAppTheme: Int): Int {
+    return when (currentAppTheme) {
+        AppCompatDelegate.MODE_NIGHT_YES -> AppCompatDelegate.MODE_NIGHT_NO
+        AppCompatDelegate.MODE_NIGHT_NO -> AppCompatDelegate.MODE_NIGHT_YES
+        else -> {
+            if (context.isDarkThemeOn())
+                AppCompatDelegate.MODE_NIGHT_NO
+            else AppCompatDelegate.MODE_NIGHT_YES
+        }
     }
 }
 
 fun openAppInfo(context: Context, userHandle: UserHandle, packageName: String) {
     val launcher = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
     val intent: Intent? = context.packageManager.getLaunchIntentForPackage(packageName)
-    launcher.startAppDetailsActivity(intent?.component, userHandle, null, null)
-//    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-//    intent.addCategory(Intent.CATEGORY_DEFAULT)
-//    intent.data = Uri.parse("package:$packageName")
-//    context.startActivity(intent)
+
+    intent?.let {
+        launcher.startAppDetailsActivity(intent.component, userHandle, null, null)
+    } ?: context.showToast(context.getString(R.string.unable_to_open_app))
 }
 
 suspend fun getBitmapFromURL(src: String?): Bitmap? {
@@ -189,7 +254,8 @@ suspend fun getBitmapFromURL(src: String?): Bitmap? {
             connection.connect()
             val input: InputStream = connection.inputStream
             bitmap = BitmapFactory.decodeStream(input)
-        } catch (e: java.lang.Exception) {
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
         bitmap
     }
@@ -204,10 +270,14 @@ suspend fun getWallpaperBitmap(originalImage: Bitmap, width: Int, height: Int): 
         val originalHeight: Float = originalImage.height.toFloat()
 
         val canvas = Canvas(background)
-        val scale: Float = height / originalHeight
+        val heightScale: Float = height / originalHeight
+        val widthScale: Float = width / originalWidth
+        val scale = maxOf(heightScale, widthScale)
 
-        val xTranslation: Float = (width - originalWidth * scale) / 2.0f
-        val yTranslation = 0.0f
+        val (xTranslation, yTranslation) = if (heightScale > widthScale)
+            Pair((width - originalWidth * heightScale) / 2.0f, 0f)
+        else
+            Pair(0f, (height - originalHeight * widthScale) / 2.0f)
 
         val transformation = Matrix()
         transformation.postTranslate(xTranslation, yTranslation)
@@ -230,7 +300,11 @@ suspend fun setWallpaper(appContext: Context, url: String): Boolean {
         val scaledBitmap = getWallpaperBitmap(originalImageBitmap, width, height)
 
         try {
-            wallpaperManager.setBitmap(scaledBitmap)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                wallpaperManager.setBitmap(scaledBitmap, null, false, WallpaperManager.FLAG_SYSTEM)
+                wallpaperManager.setBitmap(scaledBitmap, null, false, WallpaperManager.FLAG_LOCK)
+            } else
+                wallpaperManager.setBitmap(scaledBitmap)
         } catch (e: Exception) {
             return@withContext false
         }
@@ -239,6 +313,7 @@ suspend fun setWallpaper(appContext: Context, url: String): Boolean {
             originalImageBitmap.recycle()
             scaledBitmap.recycle()
         } catch (e: Exception) {
+            e.printStackTrace()
         }
         true
     }
@@ -251,13 +326,15 @@ fun getScreenDimensions(context: Context): Pair<Int, Int> {
     return Pair(point.x, point.y)
 }
 
-suspend fun getTodaysWallpaper(): String {
+suspend fun getTodaysWallpaper(wallType: String): String {
     return withContext(Dispatchers.IO) {
         var wallpaperUrl: String
-        val hour = Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
-
         try {
-            val url = URL(Constants.URL_DARK_WALLPAPERS)
+            val month = SimpleDateFormat("M", Locale.ENGLISH).format(Date()) ?: ""
+            val day = SimpleDateFormat("d", Locale.ENGLISH).format(Date()) ?: ""
+            val key = String.format("%s_%s", month, day)
+
+            val url = URL(Constants.URL_WALLPAPERS)
             val connection: HttpURLConnection = url.openConnection() as HttpURLConnection
             connection.doInput = true
             connection.connect()
@@ -270,49 +347,188 @@ suspend fun getTodaysWallpaper(): String {
             }
 
             val json = JSONObject(stringBuffer.toString())
-            wallpaperUrl = json.getString(hour.toString())
+            val wallpapers = json.getString(key)
+            val wallpapersJson = JSONObject(wallpapers)
+            wallpaperUrl = wallpapersJson.getString(wallType)
             wallpaperUrl
 
         } catch (e: Exception) {
-            wallpaperUrl = getBackupWallpaper(hour) ?: Constants.URL_DEFAULT_WALLPAPER
+            wallpaperUrl = getBackupWallpaper(wallType)
             wallpaperUrl
         }
     }
 }
 
-fun getBackupWallpaper(hour: Int): String? {
-    val wallpapers = mapOf(
-        1 to "https://images.unsplash.com/photo-1560713796-952b738c598b?w=2000&q=100",
-        2 to "https://images.unsplash.com/photo-1502899576159-f224dc2349fa?w=2000&q=100",
-        3 to "https://images.unsplash.com/photo-1555217851-6141535bd771?w=2000&q=100",
-        4 to "https://images.unsplash.com/photo-1506296933720-1a0ce9bed41d?w=2000&q=100",
-        5 to "https://images.unsplash.com/photo-1543651425-3260f9c9ecfb?w=2000&q=100",
-        6 to "https://images.unsplash.com/photo-1542676032-e505f4fe02a9?w=2000&q=100",
-        7 to "https://images.unsplash.com/photo-1578885136359-16c8bd4d3a8e?w=2000&q=100",
-        8 to "https://images.unsplash.com/photo-1511362483461-8795ba551506?w=2000&q=100",
-        9 to "https://images.unsplash.com/photo-1601969907230-092a6c065025?w=2000&q=100",
-        10 to "https://images.unsplash.com/photo-1593714011419-91b10cd8a3a6?w=2000&q=100",
-        11 to "https://images.unsplash.com/photo-1569817480240-41de5e7283c9?w=2000&q=100",
-        12 to "https://images.unsplash.com/photo-1588363243917-97873eb4a8ce?w=2000&q=100",
-        13 to "https://images.unsplash.com/photo-1576405515541-cb47b7da4fa7?w=2000&q=100",
-        14 to "https://images.unsplash.com/photo-1597407068889-782ba11fb621?w=2000&q=100",
-        15 to "https://images.unsplash.com/photo-1512850183-6d7990f42385?w=2000&q=100",
-        16 to "https://images.unsplash.com/photo-1575387779103-48eb0dc78647?w=2000&q=100",
-        17 to "https://images.unsplash.com/photo-1549948558-1c6406684186?w=2000&q=100",
-        18 to "https://images.unsplash.com/photo-1570420118092-5b96e28ff4cb?w=2000&q=100",
-        19 to "https://images.unsplash.com/photo-1550041771-aef92f14a6d5?w=2000&q=100",
-        20 to "https://images.unsplash.com/photo-1600648170020-3182aba0a7e4?w=2000&q=100",
-        21 to "https://images.unsplash.com/photo-1551382801-104df360840a?w=2000&q=100",
-        22 to "https://images.unsplash.com/photo-1546507318-dc206ad061c9?w=2000&q=100",
-        23 to "https://images.unsplash.com/photo-1574895862047-5a662529395e?w=2000&q=100",
-        24 to "https://images.unsplash.com/photo-1548625149-720134d51a3a?w=2000&q=100",
-        25 to "https://images.unsplash.com/photo-1518242340236-fd1dd715ba89?w=2000&q=100",
-        26 to "https://images.unsplash.com/photo-1541617219835-3689726fa8e7?w=2000&q=100",
-        27 to "https://images.unsplash.com/photo-1597659840241-37e2b9c2f55f?w=2000&q=100",
-        28 to "https://images.unsplash.com/photo-1585135497273-1a86b09fe70e?w=2000&q=100",
-        29 to "https://images.unsplash.com/photo-1536444640702-7d82b071cab8?w=2000&q=100",
-        30 to "https://images.unsplash.com/photo-1544111795-fe8b9def73f6?w=2000&q=100",
-        31 to "https://images.unsplash.com/photo-1600648170020-3182aba0a7e4?w=2000&q=100"
+fun getBackupWallpaper(wallType: String): String {
+    return if (wallType == Constants.WALL_TYPE_LIGHT)
+        Constants.URL_DEFAULT_LIGHT_WALLPAPER
+    else Constants.URL_DEFAULT_DARK_WALLPAPER
+}
+
+fun openSearch(context: Context) {
+    val intent = Intent(Intent.ACTION_WEB_SEARCH)
+    intent.putExtra(SearchManager.QUERY, "")
+    context.startActivity(intent)
+}
+
+@SuppressLint("WrongConstant", "PrivateApi")
+fun expandNotificationDrawer(context: Context) {
+    // Source: https://stackoverflow.com/a/51132142
+    try {
+        val statusBarService = context.getSystemService("statusbar")
+        val statusBarManager = Class.forName("android.app.StatusBarManager")
+        val method = statusBarManager.getMethod("expandNotificationsPanel")
+        method.invoke(statusBarService)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun openDialerApp(context: Context) {
+    try {
+        val sendIntent = Intent(Intent.ACTION_DIAL)
+        context.startActivity(sendIntent)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun openCameraApp(context: Context) {
+    try {
+        val sendIntent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+        context.startActivity(sendIntent)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun openAlarmApp(context: Context) {
+    try {
+        val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS)
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Log.d("TAG", e.toString())
+    }
+}
+
+fun openCalendar(context: Context) {
+    try {
+        val calendarUri = CalendarContract.CONTENT_URI
+            .buildUpon()
+            .appendPath("time")
+            .build()
+        context.startActivity(Intent(Intent.ACTION_VIEW, calendarUri))
+    } catch (e: Exception) {
+        try {
+            val intent = Intent(Intent.ACTION_MAIN)
+            intent.addCategory(Intent.CATEGORY_APP_CALENDAR)
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+}
+
+fun isAccessServiceEnabled(context: Context): Boolean {
+    val enabled = try {
+        Settings.Secure.getInt(context.applicationContext.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED)
+    } catch (e: Exception) {
+        0
+    }
+    if (enabled == 1) {
+        val enabledServicesString: String? = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        return enabledServicesString?.contains(context.packageName + "/" + MyAccessibilityService::class.java.name) ?: false
+    }
+    return false
+}
+
+fun isTablet(context: Context): Boolean {
+    val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    val metrics = DisplayMetrics()
+    windowManager.defaultDisplay.getMetrics(metrics)
+    val widthInches = metrics.widthPixels / metrics.xdpi
+    val heightInches = metrics.heightPixels / metrics.ydpi
+    val diagonalInches = sqrt(widthInches.toDouble().pow(2.0) + heightInches.toDouble().pow(2.0))
+    if (diagonalInches >= 7.0) return true
+    return false
+}
+
+fun Context.isDarkThemeOn(): Boolean {
+    return resources.configuration.uiMode and
+            Configuration.UI_MODE_NIGHT_MASK == UI_MODE_NIGHT_YES
+}
+
+fun Context.copyToClipboard(text: String) {
+    val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clipData = ClipData.newPlainText(getString(R.string.app_name), text)
+    clipboardManager.setPrimaryClip(clipData)
+    showToast("")
+}
+
+fun Context.openUrl(url: String) {
+    if (url.isEmpty()) return
+    val intent = Intent(Intent.ACTION_VIEW)
+    intent.data = Uri.parse(url)
+    startActivity(intent)
+}
+
+fun Context.isSystemApp(packageName: String): Boolean {
+    if (packageName.isBlank()) return true
+    return try {
+        val applicationInfo = packageManager.getApplicationInfo(packageName, 0)
+        ((applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0)
+                || (applicationInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0))
+    } catch (e: Exception) {
+        e.printStackTrace()
+        false
+    }
+}
+
+fun Context.uninstall(packageName: String) {
+    val intent = Intent(Intent.ACTION_DELETE)
+    intent.data = Uri.parse("package:$packageName")
+    startActivity(intent)
+}
+
+@ColorInt
+fun Context.getColorFromAttr(
+    @AttrRes attrColor: Int,
+    typedValue: TypedValue = TypedValue(),
+    resolveRefs: Boolean = true,
+): Int {
+    theme.resolveAttribute(attrColor, typedValue, resolveRefs)
+    return typedValue.data
+}
+
+fun View.animateAlpha(alpha: Float = 1.0f) {
+    this.animate().apply {
+        interpolator = LinearInterpolator()
+        duration = 200
+        alpha(alpha)
+        start()
+    }
+}
+
+fun Context.shareApp() {
+    val message = getString(R.string.are_you_using_your_phone_or_is_your_phone_using_you) +
+            "\n" + Constants.URL_OLAUNCHER_PLAY_STORE
+    val sendIntent: Intent = Intent().apply {
+        action = Intent.ACTION_SEND
+        putExtra(Intent.EXTRA_TEXT, message)
+        type = "text/plain"
+    }
+
+    val shareIntent = Intent.createChooser(sendIntent, null)
+    startActivity(shareIntent)
+}
+
+fun Context.rateApp() {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse(Constants.URL_OLAUNCHER_PLAY_STORE)
     )
-    return wallpapers[hour]
+    var flags = Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+    flags = flags or Intent.FLAG_ACTIVITY_NEW_DOCUMENT
+    intent.addFlags(flags)
+    startActivity(intent)
 }

@@ -1,62 +1,90 @@
 package app.olauncher.ui
 
+import android.os.UserHandle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.Filter
 import android.widget.Filterable
-import android.widget.TextView
+import androidx.core.view.isVisible
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import app.olauncher.R
 import app.olauncher.data.AppModel
 import app.olauncher.data.Constants
-import kotlinx.android.synthetic.main.adapter_app_drawer.view.*
+import app.olauncher.databinding.AdapterAppDrawerBinding
+import app.olauncher.helper.hideKeyboard
+import app.olauncher.helper.isSystemApp
+import app.olauncher.helper.showKeyboard
+import java.text.Normalizer
 
 class AppDrawerAdapter(
     private var flag: Int,
     private val appLabelGravity: Int,
-    private val clickListener: (AppModel) -> Unit,
+    private val appClickListener: (AppModel) -> Unit,
     private val appInfoListener: (AppModel) -> Unit,
-    private val appHideListener: (Int, AppModel) -> Unit
-) : RecyclerView.Adapter<AppDrawerAdapter.ViewHolder>(), Filterable {
+    private val appDeleteListener: (AppModel) -> Unit,
+    private val appHideListener: (AppModel, Int) -> Unit,
+    private val appRenameListener: (AppModel, String) -> Unit,
+) : ListAdapter<AppModel, AppDrawerAdapter.ViewHolder>(DIFF_CALLBACK), Filterable {
+
+    companion object {
+        val DIFF_CALLBACK = object : DiffUtil.ItemCallback<AppModel>() {
+            override fun areItemsTheSame(oldItem: AppModel, newItem: AppModel): Boolean =
+                oldItem.appPackage == newItem.appPackage && oldItem.user == newItem.user
+
+            override fun areContentsTheSame(oldItem: AppModel, newItem: AppModel): Boolean =
+                oldItem == newItem
+        }
+    }
+
+    private var autoLaunch = true
+    private var isBangSearch = false
+    private val appFilter = createAppFilter()
+    private val myUserHandle = android.os.Process.myUserHandle()
 
     var appsList: MutableList<AppModel> = mutableListOf()
     var appFilteredList: MutableList<AppModel> = mutableListOf()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder =
-        ViewHolder(
-            LayoutInflater.from(parent.context)
-                .inflate(R.layout.adapter_app_drawer, parent, false)
-        )
+        ViewHolder(AdapterAppDrawerBinding.inflate(LayoutInflater.from(parent.context), parent, false))
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        if (appFilteredList.size == 0) return
-        val appModel = appFilteredList[holder.adapterPosition]
-        holder.bind(flag, appLabelGravity, appModel, clickListener, appInfoListener)
-
-        holder.appHideButton.setOnClickListener {
-            appFilteredList.removeAt(holder.adapterPosition)
-            appsList.remove(appModel)
-            notifyItemRemoved(holder.adapterPosition)
-            appHideListener(flag, appModel)
-        }
-        try { // Automatically open the app when there's only one search result
-            if ((itemCount == 1) and (flag == Constants.FLAG_LAUNCH_APP))
-                clickListener(appFilteredList[position])
+        try {
+            if (appFilteredList.size == 0 || position == RecyclerView.NO_POSITION) return
+            val appModel = appFilteredList[holder.bindingAdapterPosition]
+            holder.bind(
+                flag,
+                appLabelGravity,
+                myUserHandle,
+                appModel,
+                appClickListener,
+                appDeleteListener,
+                appInfoListener,
+                appHideListener,
+                appRenameListener
+            )
         } catch (e: Exception) {
-
+            e.printStackTrace()
         }
     }
 
-    override fun getItemCount(): Int = appFilteredList.size
+    override fun getFilter(): Filter = this.appFilter
 
-    // Filter app search results
-    override fun getFilter(): Filter {
+    private fun createAppFilter(): Filter {
         return object : Filter() {
-            override fun performFiltering(constraint: CharSequence?): FilterResults {
-                val searchChars = constraint.toString()
-                appFilteredList = (if (searchChars.isEmpty()) appsList
-                else appsList.filter { app -> appLabelMatches(app.appLabel, searchChars) } as MutableList<AppModel>)
+            override fun performFiltering(charSearch: CharSequence?): FilterResults {
+                isBangSearch = charSearch?.startsWith("!") ?: false
+                autoLaunch = charSearch?.startsWith(" ")?.not() ?: true
+
+                val appFilteredList = (if (charSearch.isNullOrBlank()) appsList
+                else appsList.filter { app ->
+                    appLabelMatches(app.appLabel, charSearch)
+//                }.sortedByDescending {
+//                    charSearch.contentEquals(it.appLabel, true)
+                } as MutableList<AppModel>)
 
                 val filterResults = FilterResults()
                 filterResults.values = appFilteredList
@@ -65,51 +93,115 @@ class AppDrawerAdapter(
 
             @Suppress("UNCHECKED_CAST")
             override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
-                appFilteredList = results?.values as MutableList<AppModel>
-                notifyDataSetChanged()
+                results?.values?.let {
+                    appFilteredList = it as MutableList<AppModel>
+                    submitList(appFilteredList) {
+                        autoLaunch()
+                    }
+                }
             }
         }
     }
 
-    private fun appLabelMatches(appLabel: String, searchChars: String): Boolean {
-        return (appLabel.contains(searchChars, true) or
-                appLabel.replace(Regex("[-_+,. ]"), "")
-                    .contains(searchChars, true))
+    private fun autoLaunch() {
+        try {
+            if (itemCount == 1
+                && autoLaunch
+                && isBangSearch.not()
+                && flag == Constants.FLAG_LAUNCH_APP
+                && appFilteredList.size > 0
+            ) appClickListener(appFilteredList[0])
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun appLabelMatches(appLabel: String, charSearch: CharSequence): Boolean {
+        return (appLabel.contains(charSearch.trim(), true) or
+                Normalizer.normalize(appLabel, Normalizer.Form.NFD)
+                    .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+                    .replace(Regex("[-_+,. ]"), "")
+                    .contains(charSearch, true))
     }
 
     fun setAppList(appsList: MutableList<AppModel>) {
+        // Add empty app for bottom padding in recyclerview
+        appsList.add(AppModel("", null, "", "", android.os.Process.myUserHandle()))
         this.appsList = appsList
         this.appFilteredList = appsList
-        notifyDataSetChanged()
+        submitList(appsList)
     }
 
-    fun getTopApp(): AppModel? {
-        return if (appFilteredList.size > 0) appFilteredList[0]
-        else null
+    fun launchFirstInList() {
+        if (appFilteredList.size > 0)
+            appClickListener(appFilteredList[0])
     }
 
-    class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val appHideButton: TextView = itemView.appHide
+    class ViewHolder(private val binding: AdapterAppDrawerBinding) : RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(flag: Int, appLabelGravity: Int, appModel: AppModel, listener: (AppModel) -> Unit, appInfoListener: (AppModel) -> Unit) =
-            with(itemView) {
+        fun bind(
+            flag: Int,
+            appLabelGravity: Int,
+            myUserHandle: UserHandle,
+            appModel: AppModel,
+            clickListener: (AppModel) -> Unit,
+            appDeleteListener: (AppModel) -> Unit,
+            appInfoListener: (AppModel) -> Unit,
+            appHideListener: (AppModel, Int) -> Unit,
+            appRenameListener: (AppModel, String) -> Unit,
+        ) =
+            with(binding) {
                 appHideLayout.visibility = View.GONE
-                appHideButton.text = (if (flag == Constants.FLAG_HIDDEN_APPS) "SHOW" else "HIDE")
+                renameLayout.visibility = View.GONE
                 appTitle.text = appModel.appLabel
                 appTitle.gravity = appLabelGravity
+                otherProfileIndicator.isVisible = appModel.user != myUserHandle
 
-                if (appModel.user == android.os.Process.myUserHandle())
-                    otherProfileIndicator.visibility = View.GONE
-                else otherProfileIndicator.visibility = View.VISIBLE
-
-                appTitle.setOnClickListener { listener(appModel) }
+                appTitle.setOnClickListener { clickListener(appModel) }
                 appTitle.setOnLongClickListener {
-                    appHideLayout.visibility = View.VISIBLE
+                    if (appModel.appPackage.isNotEmpty()) {
+                        appDelete.alpha = if (root.context.isSystemApp(appModel.appPackage)) 0.5f else 1.0f
+                        appHide.text = if (flag == Constants.FLAG_HIDDEN_APPS)
+                            root.context.getString(R.string.adapter_show)
+                        else
+                            root.context.getString(R.string.adapter_hide)
+                        appHideLayout.visibility = View.VISIBLE
+                        appRename.isVisible = flag != Constants.FLAG_HIDDEN_APPS
+                    }
                     true
                 }
-
+                appRename.setOnClickListener {
+                    if (appModel.appPackage.isNotEmpty()) {
+                        etAppRename.hint = appModel.appLabel
+                        renameLayout.visibility = View.VISIBLE
+                        appHideLayout.visibility = View.GONE
+                        etAppRename.showKeyboard()
+                        etAppRename.imeOptions = EditorInfo.IME_ACTION_DONE;
+                    }
+                }
+                etAppRename.setOnEditorActionListener { _, actionCode, _ ->
+                    if (actionCode == EditorInfo.IME_ACTION_DONE) {
+                        val renameLabel = etAppRename.text.toString().trim()
+                        if (renameLabel.isNotBlank() && appModel.appPackage.isNotBlank()) {
+                            appRenameListener(appModel, renameLabel)
+                            renameLayout.visibility = View.GONE
+                        }
+                        true
+                    }
+                    false
+                }
+                tvSaveRename.setOnClickListener {
+                    etAppRename.hideKeyboard()
+                    val renameLabel = etAppRename.text.toString().trim()
+                    if (renameLabel.isNotBlank() && appModel.appPackage.isNotBlank()) {
+                        appRenameListener(appModel, renameLabel)
+                        renameLayout.visibility = View.GONE
+                    }
+                }
                 appInfo.setOnClickListener { appInfoListener(appModel) }
+                appDelete.setOnClickListener { appDeleteListener(appModel) }
                 appHideLayout.setOnClickListener { appHideLayout.visibility = View.GONE }
+                appHide.setOnClickListener { appHideListener(appModel, bindingAdapterPosition) }
             }
     }
 }

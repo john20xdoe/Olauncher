@@ -7,8 +7,12 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.View.OnTouchListener
 import app.olauncher.data.Constants
-import java.util.*
-import kotlin.concurrent.schedule
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /*
@@ -18,7 +22,8 @@ Source: https://www.tutorialspoint.com/how-to-handle-swipe-gestures-in-kotlin
 
 internal open class OnSwipeTouchListener(c: Context?) : OnTouchListener {
     private var longPressOn = false
-    private var doubleTapOn = false
+
+    //    private var doubleTapOn = false
     private val gestureDetector: GestureDetector
 
     override fun onTouch(view: View, motionEvent: MotionEvent): Boolean {
@@ -36,28 +41,34 @@ internal open class OnSwipeTouchListener(c: Context?) : OnTouchListener {
         }
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            if (doubleTapOn) {
-                doubleTapOn = false
-                onTripleClick()
-            }
+//            if (doubleTapOn) {
+//                doubleTapOn = false
+//                onTripleClick()
+//            }
+            onClick()
             return super.onSingleTapUp(e)
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            doubleTapOn = true
-            Timer().schedule(Constants.TRIPLE_TAP_DELAY_MS.toLong()) {
-                if (doubleTapOn) {
-                    doubleTapOn = false
-                    onDoubleClick()
-                }
-            }
+//            doubleTapOn = true
+//            Timer().schedule(Constants.TRIPLE_TAP_DELAY_MS) {
+//                if (doubleTapOn) {
+//                    doubleTapOn = false
+//                    onDoubleClick()
+//                }
+//            }
+            onDoubleClick()
             return super.onDoubleTap(e)
         }
 
         override fun onLongPress(e: MotionEvent) {
             longPressOn = true
-            Timer().schedule(Constants.LONG_PRESS_DELAY_MS.toLong()) {
-                if (longPressOn) onLongClick()
+            GlobalScope.launch {
+                delay(Constants.LONG_PRESS_DELAY_MS)
+                withContext(Dispatchers.Main) {
+                    if (isActive && longPressOn)
+                        onLongClick()
+                }
             }
             super.onLongPress(e)
         }
@@ -66,7 +77,7 @@ internal open class OnSwipeTouchListener(c: Context?) : OnTouchListener {
             event1: MotionEvent,
             event2: MotionEvent,
             velocityX: Float,
-            velocityY: Float
+            velocityY: Float,
         ): Boolean {
             try {
                 val diffY = event2.y - event1.y
@@ -94,7 +105,7 @@ internal open class OnSwipeTouchListener(c: Context?) : OnTouchListener {
     open fun onLongClick() {}
     open fun onDoubleClick() {}
     open fun onTripleClick() {}
-    private fun onClick() {}
+    open fun onClick() {}
 
     init {
         gestureDetector = GestureDetector(c, GestureListener())
