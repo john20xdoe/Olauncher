@@ -176,7 +176,7 @@ class AppDrawerAdapter(
                         renameLayout.visibility = View.VISIBLE
                         appHideLayout.visibility = View.GONE
                         etAppRename.showKeyboard()
-                        etAppRename.imeOptions = EditorInfo.IME_ACTION_DONE;
+                        etAppRename.imeOptions = EditorInfo.IME_ACTION_DONE
                     }
                 }
                 etAppRename.setOnEditorActionListener { _, actionCode, _ ->
